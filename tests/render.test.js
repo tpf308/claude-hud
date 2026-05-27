@@ -2395,6 +2395,127 @@ test('renderUsageLine shows relative and absolute time when timeFormat is "both"
   assert.ok(plain.includes('resets in'), `should use "resets in" preposition for both mode, got: ${plain}`);
 });
 
+test('renderUsageLine shows elapsed 5h window percentage when timeFormat is "elapsed"', () => {
+  const ctx = baseContext();
+  const now = Date.now();
+  ctx.config.display.usageBarEnabled = false;
+  ctx.config.display.timeFormat = 'elapsed';
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: 31,
+    sevenDay: 20,
+    fiveHourResetAt: new Date(now + 4 * 60 * 60 * 1000),
+    sevenDayResetAt: null,
+  };
+
+  const plain = stripAnsi(renderUsageLine(ctx));
+  assert.ok(plain.includes('Usage 5h 31% (20% elapsed)'), `expected elapsed window percentage, got: ${plain}`);
+  assert.ok(!plain.includes('resets'), `elapsed mode should not include reset wording, got: ${plain}`);
+});
+
+test('renderUsageLine shows elapsed 5h percentage and reset clock when timeFormat is "elapsedAndAbsolute"', () => {
+  const ctx = baseContext();
+  const now = Date.now();
+  ctx.config.display.usageBarEnabled = false;
+  ctx.config.display.timeFormat = 'elapsedAndAbsolute';
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: 31,
+    sevenDay: 20,
+    fiveHourResetAt: new Date(now + 4 * 60 * 60 * 1000),
+    sevenDayResetAt: null,
+  };
+
+  const plain = stripAnsi(renderUsageLine(ctx));
+  assert.match(plain, /Usage 5h 31% \(20% elapsed, at .+\)/, `expected elapsed percentage with absolute reset clock, got: ${plain}`);
+  assert.ok(!plain.includes('resets'), `elapsedAndAbsolute mode should not include reset wording, got: ${plain}`);
+});
+
+test('renderUsageLine rounds elapsed 7d window percentage', () => {
+  const ctx = baseContext();
+  const now = Date.now();
+  ctx.config.display.usageBarEnabled = false;
+  ctx.config.display.timeFormat = 'elapsed';
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: null,
+    sevenDay: 85,
+    fiveHourResetAt: null,
+    sevenDayResetAt: new Date(now + 5.5 * 24 * 60 * 60 * 1000),
+  };
+
+  const plain = stripAnsi(renderUsageLine(ctx));
+  assert.ok(plain.includes('Weekly 85% (21% elapsed)'), `expected rounded weekly elapsed percentage, got: ${plain}`);
+});
+
+test('renderUsageLine clamps elapsed window percentage to 100 at the reset boundary', () => {
+  const ctx = baseContext();
+  ctx.config.display.usageBarEnabled = false;
+  ctx.config.display.timeFormat = 'elapsed';
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: 31,
+    sevenDay: 20,
+    fiveHourResetAt: new Date(Date.now() - 1000),
+    sevenDayResetAt: null,
+  };
+
+  const plain = stripAnsi(renderUsageLine(ctx));
+  assert.ok(plain.includes('Usage 5h 31% (100% elapsed)'), `expected clamped elapsed percentage, got: ${plain}`);
+});
+
+test('renderUsageLine clamps elapsed window percentage to 0 when the window has not started', () => {
+  const ctx = baseContext();
+  ctx.config.display.usageBarEnabled = false;
+  ctx.config.display.timeFormat = 'elapsed';
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: 31,
+    sevenDay: 20,
+    fiveHourResetAt: new Date(Date.now() + 6 * 60 * 60 * 1000),
+    sevenDayResetAt: null,
+  };
+
+  const plain = stripAnsi(renderUsageLine(ctx));
+  assert.ok(plain.includes('Usage 5h 31% (0% elapsed)'), `expected non-negative elapsed percentage, got: ${plain}`);
+});
+
+test('renderUsageLine keeps reset label hidden in elapsedAndAbsolute mode when disabled', () => {
+  const ctx = baseContext();
+  const now = Date.now();
+  ctx.config.display.usageBarEnabled = false;
+  ctx.config.display.showResetLabel = false;
+  ctx.config.display.timeFormat = 'elapsedAndAbsolute';
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: 31,
+    sevenDay: 20,
+    fiveHourResetAt: new Date(now + 4 * 60 * 60 * 1000),
+    sevenDayResetAt: null,
+  };
+
+  const plain = stripAnsi(renderUsageLine(ctx));
+  assert.match(plain, /Usage 5h 31% \(20% elapsed, at .+\)/, `expected elapsed percentage with bare absolute reset clock, got: ${plain}`);
+  assert.ok(!plain.includes('resets'), `reset wording should stay hidden, got: ${plain}`);
+});
+
+test('renderUsageLine falls back to relative reset formatting for invalid timeFormat values', () => {
+  const ctx = baseContext();
+  ctx.config.display.usageBarEnabled = false;
+  ctx.config.display.timeFormat = 'invalid-value';
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: 31,
+    sevenDay: 20,
+    fiveHourResetAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
+    sevenDayResetAt: null,
+  };
+
+  const plain = stripAnsi(renderUsageLine(ctx));
+  assert.ok(plain.includes('resets in'), `invalid timeFormat should use relative reset wording, got: ${plain}`);
+  assert.ok(!plain.includes('elapsed'), `invalid timeFormat should not use elapsed mode, got: ${plain}`);
+});
+
 test('renderUsageLine limit-reached uses "resets in" for default relative mode', () => {
   const ctx = baseContext();
   ctx.usageData = {

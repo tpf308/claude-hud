@@ -9,6 +9,9 @@ import { progressLabel } from "./label-align.js";
 import type { TimeFormatMode, UsageValueMode } from "../../config.js";
 import { formatResetTime } from "../format-reset-time.js";
 
+const FIVE_HOUR_WINDOW_MS = 5 * 60 * 60 * 1000;
+const SEVEN_DAY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 export function renderUsageLine(
   ctx: RenderContext,
   alignLabels = false,
@@ -34,17 +37,18 @@ export function renderUsageLine(
     return `${usageLabel} ${ctx.usageData.balanceLabel}`;
   }
 
-  const timeFormat: TimeFormatMode = display?.timeFormat ?? 'relative';
+  const timeFormat = normalizeTimeFormat(display?.timeFormat);
   const showResetLabel = display?.showResetLabel ?? true;
-  const resetsKey = timeFormat === 'absolute' ? "format.resets" : "format.resetsIn";
+  const resetsKey = limitResetTimeFormat(timeFormat) === 'absolute' ? "format.resets" : "format.resetsIn";
   const usageCompact = display?.usageCompact ?? false;
   const usageValueMode = display?.usageValue ?? 'percent';
 
   if (isLimitReached(ctx.usageData)) {
+    const limitTimeFormat = limitResetTimeFormat(timeFormat);
     const resetTime =
       ctx.usageData.fiveHour === 100
-        ? formatResetTime(ctx.usageData.fiveHourResetAt, timeFormat)
-        : formatResetTime(ctx.usageData.sevenDayResetAt, timeFormat);
+        ? formatResetTime(ctx.usageData.fiveHourResetAt, limitTimeFormat)
+        : formatResetTime(ctx.usageData.sevenDayResetAt, limitTimeFormat);
     if (usageCompact) {
       return critical(`⚠ Limit${resetTime ? ` (${resetTime})` : ""}`, colors);
     }
@@ -69,10 +73,10 @@ export function renderUsageLine(
 
   if (usageCompact) {
     const fiveHourPart = fiveHour !== null
-      ? formatCompactWindowPart("5h", fiveHour, ctx.usageData.fiveHourResetAt, timeFormat, colors, usageValueMode)
+      ? formatCompactWindowPart("5h", fiveHour, ctx.usageData.fiveHourResetAt, FIVE_HOUR_WINDOW_MS, timeFormat, colors, usageValueMode)
       : null;
     const sevenDayPart = (sevenDay !== null && (fiveHour === null || sevenDay >= sevenDayThreshold))
-      ? formatCompactWindowPart("7d", sevenDay, ctx.usageData.sevenDayResetAt, timeFormat, colors, usageValueMode)
+      ? formatCompactWindowPart("7d", sevenDay, ctx.usageData.sevenDayResetAt, SEVEN_DAY_WINDOW_MS, timeFormat, colors, usageValueMode)
       : null;
 
     if (fiveHourPart && sevenDayPart) {
@@ -90,6 +94,7 @@ export function renderUsageLine(
       labelKey: "label.weekly",
       percent: sevenDay,
       resetAt: ctx.usageData.sevenDayResetAt,
+      windowMs: SEVEN_DAY_WINDOW_MS,
       colors,
       usageBarEnabled,
       barWidth,
@@ -106,6 +111,7 @@ export function renderUsageLine(
     label: "5h",
     percent: fiveHour,
     resetAt: ctx.usageData.fiveHourResetAt,
+    windowMs: FIVE_HOUR_WINDOW_MS,
     colors,
     usageBarEnabled,
     barWidth,
@@ -120,6 +126,7 @@ export function renderUsageLine(
       labelKey: "label.weekly",
       percent: sevenDay,
       resetAt: ctx.usageData.sevenDayResetAt,
+      windowMs: SEVEN_DAY_WINDOW_MS,
       colors,
       usageBarEnabled,
       barWidth,
@@ -139,12 +146,13 @@ function formatCompactWindowPart(
   windowLabel: string,
   percent: number | null,
   resetAt: Date | null,
+  windowMs: number,
   timeFormat: TimeFormatMode,
   colors?: RenderContext["config"]["colors"],
   usageValueMode: UsageValueMode = 'percent',
 ): string {
   const usageDisplay = formatUsagePercent(percent, colors, usageValueMode);
-  const reset = formatResetTime(resetAt, timeFormat);
+  const reset = formatWindowTime(resetAt, windowMs, timeFormat);
   const styledLabel = label(`${windowLabel}:`, colors);
   return reset
     ? `${styledLabel} ${usageDisplay} ${label(`(${reset})`, colors)}`
@@ -169,6 +177,7 @@ function formatUsageWindowPart({
   labelKey,
   percent,
   resetAt,
+  windowMs,
   colors,
   usageBarEnabled,
   barWidth,
@@ -182,6 +191,7 @@ function formatUsageWindowPart({
   labelKey?: MessageKey;
   percent: number | null;
   resetAt: Date | null;
+  windowMs: number;
   colors?: RenderContext["config"]["colors"];
   usageBarEnabled: boolean;
   barWidth: number;
@@ -192,14 +202,15 @@ function formatUsageWindowPart({
   usageValueMode?: UsageValueMode;
 }): string {
   const usageDisplay = formatUsagePercent(percent, colors, usageValueMode);
-  const reset = formatResetTime(resetAt, timeFormat);
+  const reset = formatWindowTime(resetAt, windowMs, timeFormat);
   const styledLabel = labelKey
     ? progressLabel(labelKey, colors, alignLabels)
     : label(windowLabel, colors);
+  const showResetWording = timeFormat !== 'elapsed' && timeFormat !== 'elapsedAndAbsolute';
   const resetsKey = timeFormat === 'absolute' ? "format.resets" : "format.resetsIn";
 
   const resetSuffix = reset
-    ? showResetLabel
+    ? showResetLabel && showResetWording
       ? `(${t(resetsKey)} ${reset})`
       : `(${reset})`
     : "";
@@ -214,4 +225,61 @@ function formatUsageWindowPart({
   return resetSuffix
     ? `${styledLabel} ${usageDisplay} ${resetSuffix}`
     : `${styledLabel} ${usageDisplay}`;
+}
+
+function normalizeTimeFormat(value: unknown): TimeFormatMode {
+  if (
+    value === 'absolute'
+    || value === 'both'
+    || value === 'elapsed'
+    || value === 'elapsedAndAbsolute'
+  ) {
+    return value;
+  }
+
+  return 'relative';
+}
+
+function limitResetTimeFormat(timeFormat: TimeFormatMode): 'relative' | 'absolute' | 'both' {
+  if (timeFormat === 'elapsedAndAbsolute') {
+    return 'absolute';
+  }
+
+  if (timeFormat === 'elapsed') {
+    return 'relative';
+  }
+
+  return timeFormat;
+}
+
+function formatWindowTime(
+  resetAt: Date | null,
+  windowMs: number,
+  timeFormat: TimeFormatMode,
+): string {
+  if (timeFormat === 'elapsed') {
+    return formatElapsedWindow(resetAt, windowMs);
+  }
+
+  if (timeFormat === 'elapsedAndAbsolute') {
+    const elapsed = formatElapsedWindow(resetAt, windowMs);
+    const absolute = formatResetTime(resetAt, 'absolute');
+    if (elapsed && absolute) {
+      return `${elapsed}, ${absolute}`;
+    }
+    return elapsed || absolute;
+  }
+
+  return formatResetTime(resetAt, timeFormat);
+}
+
+function formatElapsedWindow(resetAt: Date | null, windowMs: number): string {
+  if (!resetAt) {
+    return '';
+  }
+
+  const windowStart = resetAt.getTime() - windowMs;
+  const rawElapsed = ((Date.now() - windowStart) / windowMs) * 100;
+  const elapsed = Math.max(0, Math.min(100, Math.round(rawElapsed)));
+  return `${elapsed}% elapsed`;
 }
