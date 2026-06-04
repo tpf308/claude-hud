@@ -827,3 +827,34 @@ test('mergeConfig independently validates barFilled and barEmpty', () => {
   assert.equal(config.colors.barFilled, '█');
   assert.equal(config.colors.barEmpty, DEFAULT_CONFIG.colors.barEmpty);
 });
+
+test('mergeConfig defaults showAdvisor to false', () => {
+  const config = mergeConfig({});
+  assert.equal(config.display.showAdvisor, false);
+  assert.equal(DEFAULT_CONFIG.display.showAdvisor, false);
+});
+
+test('mergeConfig preserves explicit showAdvisor=true', () => {
+  const config = mergeConfig({ display: { showAdvisor: true } });
+  assert.equal(config.display.showAdvisor, true);
+});
+
+test('mergeConfig defaults advisorOverride to empty string', () => {
+  const config = mergeConfig({});
+  assert.equal(config.display.advisorOverride, '');
+});
+
+test('mergeConfig preserves explicit advisorOverride and caps at 80 chars', () => {
+  const config = mergeConfig({ display: { advisorOverride: 'Opus 4.7 (custom)' } });
+  assert.equal(config.display.advisorOverride, 'Opus 4.7 (custom)');
+
+  const longValue = 'x'.repeat(120);
+  const capped = mergeConfig({ display: { advisorOverride: longValue } });
+  assert.equal(capped.display.advisorOverride.length, 80);
+});
+
+test('mergeConfig rejects non-string advisorOverride and non-boolean showAdvisor', () => {
+  const config = mergeConfig({ display: { showAdvisor: 'yes', advisorOverride: 42 } });
+  assert.equal(config.display.showAdvisor, false);
+  assert.equal(config.display.advisorOverride, '');
+});

@@ -7,6 +7,7 @@ import { getOutputSpeed } from '../../speed-tracker.js';
 import { git as gitColor, gitBranch as gitBranchColor, warning as warningColor, critical as criticalColor, label, model as modelColor, project as projectColor, red, green, yellow, dim, custom as customColor } from '../colors.js';
 import { t } from '../../i18n/index.js';
 import { renderCostEstimate } from './cost.js';
+import { renderAdvisorLine } from './advisor.js';
 import { normalizeAddedDirs, sanitize as sanitizeDisplayText, basenameOf, truncateBasename, MAX_RENDERED_ADDED_DIRS } from './added-dirs.js';
 
 function hyperlink(uri: string, text: string): string {
@@ -148,6 +149,15 @@ export function renderProjectLine(ctx: RenderContext): string | null {
     parts.push(projectWithDirs);
   } else if (gitPart) {
     parts.push(gitPart);
+  }
+
+  // Advisor model sits inline with the model/project/git badge so the
+  // configured /advisor is visible on the first line at a glance.
+  if (display?.showAdvisor) {
+    const advisorPart = renderAdvisorLine(ctx);
+    if (advisorPart) {
+      parts.push(advisorPart);
+    }
   }
 
   if (display?.showSessionName && ctx.transcript.sessionName) {
