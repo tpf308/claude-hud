@@ -34,6 +34,10 @@ export function renderUsageLine(
   const usageLabel = progressLabel("label.usage", colors, alignLabels);
   const balanceLabel = ctx.usageData.balanceLabel ?? null;
   const hasWindowData = ctx.usageData.fiveHour !== null || ctx.usageData.sevenDay !== null;
+  // When a snapshot supplies concrete dollar details (e.g. a provider balance), a
+  // fully-used window should still render its bar + remaining amount rather than the
+  // generic limit-reached warning, so the other window's balance stays visible.
+  const hasWindowDetail = Boolean(ctx.usageData.fiveHourDetail || ctx.usageData.sevenDayDetail);
 
   if (balanceLabel && !hasWindowData) {
     return `${usageLabel} ${balanceLabel}`;
@@ -45,7 +49,7 @@ export function renderUsageLine(
   const usageCompact = display?.usageCompact ?? false;
   const usageValueMode = display?.usageValue ?? 'percent';
 
-  if (isLimitReached(ctx.usageData)) {
+  if (isLimitReached(ctx.usageData) && !hasWindowDetail) {
     const limitTimeFormat = limitResetTimeFormat(timeFormat);
     const resetTime =
       ctx.usageData.fiveHour === 100
@@ -75,10 +79,10 @@ export function renderUsageLine(
 
   if (usageCompact) {
     const fiveHourPart = fiveHour !== null
-      ? formatCompactWindowPart("5h", fiveHour, ctx.usageData.fiveHourResetAt, FIVE_HOUR_WINDOW_MS, timeFormat, colors, usageValueMode)
+      ? formatCompactWindowPart("5h", fiveHour, ctx.usageData.fiveHourResetAt, FIVE_HOUR_WINDOW_MS, timeFormat, colors, usageValueMode, ctx.usageData.fiveHourDetail ?? null)
       : null;
     const sevenDayPart = (sevenDay !== null && (fiveHour === null || sevenDay >= sevenDayThreshold))
-      ? formatCompactWindowPart("7d", sevenDay, ctx.usageData.sevenDayResetAt, SEVEN_DAY_WINDOW_MS, timeFormat, colors, usageValueMode)
+      ? formatCompactWindowPart("7d", sevenDay, ctx.usageData.sevenDayResetAt, SEVEN_DAY_WINDOW_MS, timeFormat, colors, usageValueMode, ctx.usageData.sevenDayDetail ?? null)
       : null;
 
     if (fiveHourPart && sevenDayPart) {
@@ -89,23 +93,25 @@ export function renderUsageLine(
   }
 
   const usageBarEnabled = display?.usageBarEnabled ?? true;
+  // The seven-day window can hide its bar independently of the 5h bar.
+  const sevenDayBarEnabled = usageBarEnabled && (display?.sevenDayBarEnabled ?? true);
   const barWidth = getAdaptiveBarWidth();
 
   if (fiveHour === null && sevenDay !== null) {
     const weeklyOnlyPart = formatUsageWindowPart({
-      label: t("label.weekly"),
-      labelKey: "label.weekly",
+      label: "7d",
       percent: sevenDay,
       resetAt: ctx.usageData.sevenDayResetAt,
       windowMs: SEVEN_DAY_WINDOW_MS,
       colors,
-      usageBarEnabled,
+      usageBarEnabled: sevenDayBarEnabled,
       barWidth,
       timeFormat,
       showResetLabel,
       forceLabel: true,
       alignLabels,
       usageValueMode,
+      detail: ctx.usageData.sevenDayDetail ?? null,
     });
     return appendBalance(`${usageLabel} ${weeklyOnlyPart}`, balanceLabel);
   }
@@ -121,23 +127,27 @@ export function renderUsageLine(
     timeFormat,
     showResetLabel,
     usageValueMode,
+    // Force the "5h" label so the window reads symmetrically with the "7d"
+    // part when concrete dollar details are shown (e.g. a provider balance).
+    forceLabel: hasWindowDetail,
+    detail: ctx.usageData.fiveHourDetail ?? null,
   });
 
   if (sevenDay !== null && sevenDay >= sevenDayThreshold) {
     const sevenDayPart = formatUsageWindowPart({
-      label: t("label.weekly"),
-      labelKey: "label.weekly",
+      label: "7d",
       percent: sevenDay,
       resetAt: ctx.usageData.sevenDayResetAt,
       windowMs: SEVEN_DAY_WINDOW_MS,
       colors,
-      usageBarEnabled,
+      usageBarEnabled: sevenDayBarEnabled,
       barWidth,
       timeFormat,
       showResetLabel,
       forceLabel: true,
       alignLabels,
       usageValueMode,
+      detail: ctx.usageData.sevenDayDetail ?? null,
     });
     return appendBalance(`${usageLabel} ${fiveHourPart} | ${sevenDayPart}`, balanceLabel);
   }
@@ -157,8 +167,9 @@ function formatCompactWindowPart(
   timeFormat: TimeFormatMode,
   colors?: RenderContext["config"]["colors"],
   usageValueMode: UsageValueMode = 'percent',
+  detail: string | null = null,
 ): string {
-  const usageDisplay = formatUsagePercent(percent, colors, usageValueMode);
+  const usageDisplay = formatUsageValue(percent, colors, usageValueMode, detail);
   const reset = formatWindowTime(resetAt, windowMs, timeFormat);
   const styledLabel = label(`${windowLabel}:`, colors);
   return reset
@@ -179,6 +190,23 @@ function formatUsagePercent(
   return `${color}${displayPercent}%${RESET}`;
 }
 
+// Renders the value token for a usage window. When an external snapshot
+// supplies a concrete `detail` string (e.g. "剩$6.37/$10"), it replaces the
+// "NN%" token entirely but is still tinted by the quota color so it shifts
+// green→yellow→red as the window fills. Falls back to the percentage display
+// when no detail is provided.
+function formatUsageValue(
+  percent: number | null,
+  colors?: RenderContext["config"]["colors"],
+  mode: UsageValueMode = 'percent',
+  detail?: string | null,
+): string {
+  if (detail) {
+    return `${getQuotaColor(percent ?? 0, colors)}${detail}${RESET}`;
+  }
+  return formatUsagePercent(percent, colors, mode);
+}
+
 function formatUsageWindowPart({
   label: windowLabel,
   labelKey,
@@ -193,6 +221,7 @@ function formatUsageWindowPart({
   forceLabel = false,
   alignLabels = false,
   usageValueMode = 'percent',
+  detail = null,
 }: {
   label: string;
   labelKey?: MessageKey;
@@ -207,8 +236,9 @@ function formatUsageWindowPart({
   forceLabel?: boolean;
   alignLabels?: boolean;
   usageValueMode?: UsageValueMode;
+  detail?: string | null;
 }): string {
-  const usageDisplay = formatUsagePercent(percent, colors, usageValueMode);
+  const usageDisplay = formatUsageValue(percent, colors, usageValueMode, detail);
   const reset = formatWindowTime(resetAt, windowMs, timeFormat);
   const styledLabel = labelKey
     ? progressLabel(labelKey, colors, alignLabels)

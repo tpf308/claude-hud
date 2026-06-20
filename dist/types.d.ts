@@ -76,15 +76,19 @@ export interface UsageData {
     fiveHourResetAt: Date | null;
     sevenDayResetAt: Date | null;
     balanceLabel?: string | null;
+    fiveHourDetail?: string | null;
+    sevenDayDetail?: string | null;
 }
 export interface ExternalUsageSnapshot {
     five_hour?: {
         used_percentage?: number | null;
         resets_at?: string | number | null;
+        detail?: string | null;
     } | null;
     seven_day?: {
         used_percentage?: number | null;
         resets_at?: string | number | null;
+        detail?: string | null;
     } | null;
     updated_at?: string | number | null;
     balance_label?: string | null;

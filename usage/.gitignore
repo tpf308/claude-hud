@@ -1,0 +1,6 @@
+# Runtime + secret files for the usage statusline integration.
+usage.config.json
+usage-snapshot.json
+poll.log
+.poll.lock
+*.tmp

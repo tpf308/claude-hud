@@ -57,6 +57,10 @@ export const DEFAULT_CONFIG = {
         usageBarEnabled: true,
         showResetLabel: true,
         usageCompact: false,
+        sevenDayBarEnabled: true,
+        rightAlignTail: false,
+        rightAlignReserve: 1,
+        projectModelAtEnd: false,
         showTools: false,
         showSkills: false,
         showMcp: false,
@@ -402,6 +406,16 @@ export function mergeConfig(userConfig) {
         usageCompact: typeof migrated.display?.usageCompact === 'boolean'
             ? migrated.display.usageCompact
             : DEFAULT_CONFIG.display.usageCompact,
+        sevenDayBarEnabled: typeof migrated.display?.sevenDayBarEnabled === 'boolean'
+            ? migrated.display.sevenDayBarEnabled
+            : DEFAULT_CONFIG.display.sevenDayBarEnabled,
+        rightAlignTail: typeof migrated.display?.rightAlignTail === 'boolean'
+            ? migrated.display.rightAlignTail
+            : DEFAULT_CONFIG.display.rightAlignTail,
+        rightAlignReserve: validateNonNegativeInteger(migrated.display?.rightAlignReserve, DEFAULT_CONFIG.display.rightAlignReserve),
+        projectModelAtEnd: typeof migrated.display?.projectModelAtEnd === 'boolean'
+            ? migrated.display.projectModelAtEnd
+            : DEFAULT_CONFIG.display.projectModelAtEnd,
         showTools: typeof migrated.display?.showTools === 'boolean'
             ? migrated.display.showTools
             : DEFAULT_CONFIG.display.showTools,

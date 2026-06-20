@@ -83,16 +83,24 @@ export interface UsageData {
   fiveHourResetAt: Date | null;
   sevenDayResetAt: Date | null;
   balanceLabel?: string | null;  // optional raw balance text (e.g. "¥6.35")
+  // Optional per-window detail string rendered in place of the "NN%" token
+  // (e.g. "剩$6.37/$10"). Used by external snapshots that report a concrete
+  // dollar balance rather than a pure rate-limit percentage. The bar still
+  // fills by the used_percentage; only the value label is replaced.
+  fiveHourDetail?: string | null;
+  sevenDayDetail?: string | null;
 }
 
 export interface ExternalUsageSnapshot {
   five_hour?: {
     used_percentage?: number | null;
     resets_at?: string | number | null;
+    detail?: string | null;
   } | null;
   seven_day?: {
     used_percentage?: number | null;
     resets_at?: string | number | null;
+    detail?: string | null;
   } | null;
   updated_at?: string | number | null;
   balance_label?: string | null;

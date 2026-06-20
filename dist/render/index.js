@@ -378,8 +378,24 @@ function renderExpanded(ctx, terminalWidth = null) {
                 }))
                     .filter((entry) => typeof entry.line === 'string' && entry.line.length > 0);
                 if (renderedGroupLines.length > 1) {
-                    const combinedLine = renderedGroupLines.map(({ line }) => line).join(' │ ');
                     const widthIsReal = terminalWidth !== UNKNOWN_TERMINAL_WIDTH;
+                    const rightAlignTail = ctx.config?.display?.rightAlignTail ?? false;
+                    const rightAlignReserve = ctx.config?.display?.rightAlignReserve ?? 1;
+                    let combinedLine;
+                    if (rightAlignTail && widthIsReal && terminalWidth) {
+                        // Push the last segment to the right edge: head ...pad... tail.
+                        // Reserve columns so terminals that render ambiguous-width glyphs
+                        // (bars/box-drawing) as 2 cells don't overflow and truncate the tail.
+                        const headLine = renderedGroupLines.slice(0, -1).map(({ line }) => line).join(' │ ');
+                        const tailLine = renderedGroupLines[renderedGroupLines.length - 1].line;
+                        const pad = terminalWidth - rightAlignReserve - visualLength(headLine) - visualLength(tailLine);
+                        combinedLine = pad >= 1
+                            ? `${headLine}${' '.repeat(pad)}${tailLine}`
+                            : `${headLine} │ ${tailLine}`;
+                    }
+                    else {
+                        combinedLine = renderedGroupLines.map(({ line }) => line).join(' │ ');
+                    }
                     const canCombine = !widthIsReal || visualLength(combinedLine) <= terminalWidth;
                     if (canCombine) {
                         lines.push({

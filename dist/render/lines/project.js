@@ -27,10 +27,15 @@ export function renderProjectLine(ctx) {
     if (customLine && customLinePosition === 'first') {
         parts.push(customColor(customLine, colors));
     }
+    const modelAtEnd = display?.projectModelAtEnd ?? false;
+    let modelBadge = null;
     if (display?.showModel !== false) {
         const model = formatModelName(getModelName(ctx.stdin), ctx.config?.display?.modelFormat, ctx.config?.display?.modelOverride);
         const modelDisplay = formatModelDisplay(model, ctx);
-        parts.push(modelColor(`[${modelDisplay}]`, colors));
+        modelBadge = modelColor(`[${modelDisplay}]`, colors);
+    }
+    if (modelBadge && !modelAtEnd) {
+        parts.push(modelBadge);
     }
     let projectPart = null;
     if (display?.showProject !== false && ctx.stdin.cwd) {
@@ -135,6 +140,9 @@ export function renderProjectLine(ctx) {
     }
     if (customLine && customLinePosition === 'last') {
         parts.push(customColor(customLine, colors));
+    }
+    if (modelBadge && modelAtEnd) {
+        parts.push(modelBadge);
     }
     if (parts.length === 0) {
         return null;

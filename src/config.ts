@@ -125,6 +125,19 @@ export interface HudConfig {
     usageBarEnabled: boolean;
     showResetLabel: boolean;
     usageCompact: boolean;
+    // Show the progress bar for the seven-day window. When false, the 7d window
+    // renders as just its label + value + reset (no bar). Independent of the 5h bar.
+    sevenDayBarEnabled: boolean;
+    // Right-align the LAST element of a merge group against the terminal width
+    // (e.g. push the project/model block to the right edge of the merged line).
+    rightAlignTail: boolean;
+    // Columns to keep free at the right edge when rightAlignTail is on. Guards
+    // against terminals that render ambiguous-width glyphs (bars/box-drawing)
+    // as 2 cells, which would otherwise overflow and truncate the tail.
+    rightAlignReserve: number;
+    // Render the model badge at the END of the project line instead of the
+    // start, so the project+git reads before the model (e.g. "proj git │ [Opus]").
+    projectModelAtEnd: boolean;
     showTools: boolean;
     showSkills: boolean;
     showMcp: boolean;
@@ -213,6 +226,10 @@ export const DEFAULT_CONFIG: HudConfig = {
     usageBarEnabled: true,
     showResetLabel: true,
     usageCompact: false,
+    sevenDayBarEnabled: true,
+    rightAlignTail: false,
+    rightAlignReserve: 1,
+    projectModelAtEnd: false,
     showTools: false,
     showSkills: false,
     showMcp: false,
@@ -602,6 +619,19 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
     usageCompact: typeof migrated.display?.usageCompact === 'boolean'
       ? migrated.display.usageCompact
       : DEFAULT_CONFIG.display.usageCompact,
+    sevenDayBarEnabled: typeof migrated.display?.sevenDayBarEnabled === 'boolean'
+      ? migrated.display.sevenDayBarEnabled
+      : DEFAULT_CONFIG.display.sevenDayBarEnabled,
+    rightAlignTail: typeof migrated.display?.rightAlignTail === 'boolean'
+      ? migrated.display.rightAlignTail
+      : DEFAULT_CONFIG.display.rightAlignTail,
+    rightAlignReserve: validateNonNegativeInteger(
+      migrated.display?.rightAlignReserve,
+      DEFAULT_CONFIG.display.rightAlignReserve,
+    ),
+    projectModelAtEnd: typeof migrated.display?.projectModelAtEnd === 'boolean'
+      ? migrated.display.projectModelAtEnd
+      : DEFAULT_CONFIG.display.projectModelAtEnd,
     showTools: typeof migrated.display?.showTools === 'boolean'
       ? migrated.display.showTools
       : DEFAULT_CONFIG.display.showTools,

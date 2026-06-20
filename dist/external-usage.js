@@ -205,6 +205,8 @@ export function getUsageFromExternalSnapshot(config, now = Date.now()) {
         const fiveHour = parseUsagePercent(parsed.five_hour?.used_percentage);
         const sevenDay = parseUsagePercent(parsed.seven_day?.used_percentage);
         const balanceLabel = sanitizeBalanceLabel(parsed.balance_label);
+        const fiveHourDetail = sanitizeBalanceLabel(parsed.five_hour?.detail);
+        const sevenDayDetail = sanitizeBalanceLabel(parsed.seven_day?.detail);
         if (fiveHour === null && sevenDay === null && balanceLabel === null) {
             return null;
         }
@@ -224,6 +226,12 @@ export function getUsageFromExternalSnapshot(config, now = Date.now()) {
         };
         if (balanceLabel !== null) {
             usage.balanceLabel = balanceLabel;
+        }
+        if (fiveHourDetail !== null) {
+            usage.fiveHourDetail = fiveHourDetail;
+        }
+        if (sevenDayDetail !== null) {
+            usage.sevenDayDetail = sevenDayDetail;
         }
         return usage;
     }

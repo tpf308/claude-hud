@@ -70,6 +70,10 @@ export interface HudConfig {
         usageBarEnabled: boolean;
         showResetLabel: boolean;
         usageCompact: boolean;
+        sevenDayBarEnabled: boolean;
+        rightAlignTail: boolean;
+        rightAlignReserve: number;
+        projectModelAtEnd: boolean;
         showTools: boolean;
         showSkills: boolean;
         showMcp: boolean;
