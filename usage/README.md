@@ -20,8 +20,10 @@ plugin runs.
     blocks the render);
   - render the HUD in the same process via `import('../dist/index.js').main()`
     (reads stdin / writes stdout) — no second node process.
-- `usage/statusline.mjs --poll` = one-shot: query the provider usage endpoint and
-  atomically write `usage-snapshot.json`.
+- `usage/statusline.mjs --poll` = one-shot: query the provider usage endpoint
+  and — with the same cookie — the sibling `/api/billing` endpoint for the
+  account's extra prepaid balance (the poller has real `fetch`, so one poll
+  covers both endpoints), then atomically write `usage-snapshot.json`.
 - Plugin side: three small source tweaks add a per-window `detail` string so each
   window can show a concrete amount (e.g. `$6.37`) in place of `NN%`, while the
   bar still fills by used-percentage (`src/types.ts`, `src/external-usage.ts`,
@@ -60,12 +62,17 @@ returns 401 there), so `usage.config.json`'s `source` decides which cookie to us
   "source": "cc-switch",
   "apiUrl": "https://<provider>/api/usage",
   "cookie": "bm_session=…",
-  "refreshStaleMs": 120000
+  "refreshStaleMs": 120000,
+  "balanceEnabled": true,
+  "balancePrefix": "额外 "
 }
 ```
 
 The poller maps the endpoint's `window5h` / `windowWeek` (`usedCents` /
-`limitCents` / `resetsAt`) into the snapshot.
+`limitCents` / `resetsAt`) into the snapshot. When `balanceEnabled` (default
+true), it also reads `creditCents` from `/api/billing` (derived from `apiUrl` by
+swapping the trailing `usage`→`billing`, or set `balanceUrl`) and appends it
+after the windows as `<balancePrefix>$X` (default `额外 $X`).
 
 ## Single-line / right-aligned layout
 

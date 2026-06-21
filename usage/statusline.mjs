@@ -64,6 +64,17 @@ const DEFAULTS = {
   lockTtlMs: 60000,
   // fetch timeout for the usage request.
   timeoutMs: 10000,
+  // Also show the account's extra prepaid balance (creditCents) from the
+  // sibling /api/billing endpoint. This poller runs in real Node with fetch
+  // (unlike cc-switch's sandboxed extractor, which can only hit one endpoint
+  // per config), so it can query usage + billing in the same poll and append
+  // the balance after the usage windows.
+  balanceEnabled: true,
+  // Override the balance endpoint; empty = derive from the usage url by
+  // swapping the trailing path segment (…/usage → …/billing).
+  balanceUrl: '',
+  // Text shown before the balance amount, e.g. "额外 $43.13".
+  balancePrefix: '额外 ',
 };
 
 function loadConfig() {
@@ -170,6 +181,54 @@ async function resolveSource(cfg) {
   return null;
 }
 
+// GET JSON-ish with a *cleared* timeout. AbortSignal.timeout() leaves a dangling
+// timer handle that can trip a libuv assertion (UV_HANDLE_CLOSING) when the
+// process exits via process.exit() on Windows; an explicit controller +
+// clearTimeout in finally removes the lingering handle so exit is clean.
+async function fetchWithTimeout(url, cookie, cfg) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
+  try {
+    return await fetch(url, {
+      method: 'GET',
+      headers: {
+        Cookie: cookie,
+        'User-Agent': cfg.userAgent,
+        Accept: 'application/json',
+      },
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Best-effort: fetch the account's extra prepaid balance (creditCents) from the
+// provider's /api/billing endpoint, reusing the same cookie as the usage query.
+// Returns a short label like "余额 $43.13", or null if disabled/unavailable so
+// the usage windows still render on their own. Never throws into poll().
+async function fetchBalanceLabel(cfg, src) {
+  if (!cfg.balanceEnabled) return null;
+  const url = cfg.balanceUrl || src.url.replace(/usage(\?.*)?$/, 'billing$1');
+  if (!url || url === src.url) return null; // couldn't derive a distinct endpoint
+  try {
+    const res = await fetchWithTimeout(url, src.cookie, cfg);
+    if (!res.ok) {
+      log(`billing: HTTP ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    if (!data || data.creditCents === undefined || data.creditCents === null) {
+      log('billing: response missing creditCents');
+      return null;
+    }
+    return `${cfg.balancePrefix}${fmtDollars(data.creditCents)}`;
+  } catch (e) {
+    log(`billing: fetch error ${e?.message || e}`);
+    return null;
+  }
+}
+
 async function poll() {
   const cfg = loadConfig();
   const src = await resolveSource(cfg);
@@ -180,15 +239,7 @@ async function poll() {
 
   let data;
   try {
-    const res = await fetch(src.url, {
-      method: 'GET',
-      headers: {
-        Cookie: src.cookie,
-        'User-Agent': cfg.userAgent,
-        Accept: 'application/json',
-      },
-      signal: AbortSignal.timeout(cfg.timeoutMs),
-    });
+    const res = await fetchWithTimeout(src.url, src.cookie, cfg);
     if (!res.ok) {
       log(`poll: HTTP ${res.status}`);
       maybeWriteError(cfg, `额度查询失败 HTTP ${res.status}`);
@@ -213,6 +264,9 @@ async function poll() {
   // Only the remaining balance, e.g. "$3.29".
   const remainDetail = (used, limit) => fmtDollars(limit - used);
 
+  // Same cookie also unlocks the account's extra balance on /api/billing.
+  const balanceLabel = await fetchBalanceLabel(cfg, src);
+
   const snapshot = {
     updated_at: new Date().toISOString(),
     five_hour: {
@@ -225,11 +279,11 @@ async function poll() {
       resets_at: wk.resetsAt ?? null,
       detail: remainDetail(wk.usedCents || 0, wk.limitCents || 0),
     },
-    balance_label: null,
+    balance_label: balanceLabel,
   };
 
   atomicWriteJson(SNAPSHOT_PATH, snapshot);
-  log(`poll: ok [${src.provider}] 5h=${snapshot.five_hour.detail} 7d=${snapshot.seven_day.detail}`);
+  log(`poll: ok [${src.provider}] 5h=${snapshot.five_hour.detail} 7d=${snapshot.seven_day.detail}${balanceLabel ? ` ${balanceLabel}` : ''}`);
   return 0;
 }
 
@@ -275,11 +329,19 @@ async function wrapper() {
 }
 
 if (process.argv[2] === '--poll') {
+  // Set exitCode and let the event loop drain instead of process.exit(): forcing
+  // exit while undici's (Node fetch) keep-alive sockets are mid-close trips a
+  // libuv assertion (UV_HANDLE_CLOSING) on Windows. Draining lets those handles
+  // close on their own; a short unref'd watchdog still guarantees termination if
+  // a socket lingers (its delay never holds back a clean natural exit).
   poll()
-    .then((code) => process.exit(code))
+    .then((code) => { process.exitCode = code; })
     .catch((e) => {
       log(`poll fatal: ${e?.message || e}`);
-      process.exit(1);
+      process.exitCode = 1;
+    })
+    .finally(() => {
+      setTimeout(() => process.exit(process.exitCode ?? 0), 8000).unref();
     });
 } else {
   wrapper().catch((e) => {
