@@ -66,6 +66,7 @@ export interface HudConfig {
         showSpeed: boolean;
         showTokenBreakdown: boolean;
         showUsage: boolean;
+        showSevenDay: boolean;
         usageValue: UsageValueMode;
         usageBarEnabled: boolean;
         showResetLabel: boolean;

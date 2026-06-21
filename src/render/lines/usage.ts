@@ -68,7 +68,10 @@ export function renderUsageLine(
 
   const threshold = display?.usageThreshold ?? 0;
   const fiveHour = ctx.usageData.fiveHour;
-  const sevenDay = ctx.usageData.sevenDay;
+  // showSevenDay:false drops the weekly window entirely (every 7d render path is
+  // gated on `sevenDay !== null`), which the usage threshold can't do once 7d is
+  // 100% used (the threshold is clamped to ≤100, so `100 >= 100` always shows it).
+  const sevenDay = display?.showSevenDay === false ? null : ctx.usageData.sevenDay;
 
   const effectiveUsage = Math.max(fiveHour ?? 0, sevenDay ?? 0);
   if (effectiveUsage < threshold) {

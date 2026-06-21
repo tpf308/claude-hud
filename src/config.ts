@@ -121,6 +121,7 @@ export interface HudConfig {
     showSpeed: boolean;
     showTokenBreakdown: boolean;
     showUsage: boolean;
+    showSevenDay: boolean;
     usageValue: UsageValueMode;
     usageBarEnabled: boolean;
     showResetLabel: boolean;
@@ -222,6 +223,7 @@ export const DEFAULT_CONFIG: HudConfig = {
     showSpeed: false,
     showTokenBreakdown: true,
     showUsage: true,
+    showSevenDay: true,
     usageValue: 'percent',
     usageBarEnabled: true,
     showResetLabel: true,
@@ -604,6 +606,9 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
     showTokenBreakdown: typeof migrated.display?.showTokenBreakdown === 'boolean'
       ? migrated.display.showTokenBreakdown
       : DEFAULT_CONFIG.display.showTokenBreakdown,
+    showSevenDay: typeof migrated.display?.showSevenDay === 'boolean'
+      ? migrated.display.showSevenDay
+      : DEFAULT_CONFIG.display.showSevenDay,
     showUsage: typeof migrated.display?.showUsage === 'boolean'
       ? migrated.display.showUsage
       : DEFAULT_CONFIG.display.showUsage,
