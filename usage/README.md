@@ -29,15 +29,20 @@ plugin runs.
   bar still fills by used-percentage (`src/types.ts`, `src/external-usage.ts`,
   `src/render/lines/usage.ts`).
 
-## Cookie source (`source`)
+## Auth source (`source`)
 
-The usage endpoint is authenticated by a browser session **cookie** (the API key
-returns 401 there), so `usage.config.json`'s `source` decides which cookie to use:
+Provider dashboards are typically authenticated by a browser session **cookie**
+(the API key returns 401 there); some providers instead expose a key-authenticated
+billing endpoint. `usage.config.json`'s `source` decides where the auth comes from:
 
 - `cc-switch` (default): every poll opens `~/.cc-switch/cc-switch.db` (read-only)
-  and reads the `usage_script` cookie of the provider with
+  and reads the `usage_script` of the provider with
   `app_type='claude' AND is_current=1` — i.e. **whichever provider is currently
-  active**, so it auto-follows switches/failover. Falls back to the static cookie.
+  active**, so it auto-follows switches/failover. Both auth styles are recognized:
+  a session `Cookie` or an `Authorization` header (cc-switch's `{{baseUrl}}` /
+  `{{apiKey}}` template placeholders are resolved from the provider's env, the
+  same substitution cc-switch itself applies before running the script). Falls
+  back to the static cookie.
 - `static`: always use the `cookie` + `apiUrl` in `usage.config.json`.
 - The `USAGE_COOKIE` env var overrides both.
 
@@ -73,6 +78,11 @@ The poller maps the endpoint's `window5h` / `windowWeek` (`usedCents` /
 true), it also reads `creditCents` from `/api/billing` (derived from `apiUrl` by
 swapping the trailing `usage`→`billing`, or set `balanceUrl`) and appends it
 after the windows as `<balancePrefix>$X` (default `额外 $X`).
+
+Endpoints that only report a cumulative spend (OpenAI dashboard style:
+`total_usage` in cents, e.g. a New API relay's `/v1/dashboard/billing/usage`)
+are also recognized: the snapshot then carries no windows and the Usage line
+shows a standalone `<usedPrefix>$X` (default `已用 $X`).
 
 ## Single-line / right-aligned layout
 

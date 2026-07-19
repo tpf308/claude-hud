@@ -21,9 +21,11 @@
  *              snapshot schema claude-hud's external-usage reader understands,
  *              and write it atomically.
  *
- * Cookie source: by default the active provider's usage cookie is read live from
- * cc-switch's DB (so the balance always tracks whichever provider is serving you,
- * including failover); a static cookie in usage.config.json is the fallback.
+ * Auth source: by default the active provider's usage_script auth (session Cookie
+ * or Authorization header, with cc-switch's {{baseUrl}}/{{apiKey}} placeholders
+ * resolved from the provider env) is read live from cc-switch's DB, so the balance
+ * always tracks whichever provider is serving you, including failover; a static
+ * cookie in usage.config.json is the fallback.
  */
 import {
   readFileSync,
@@ -75,6 +77,9 @@ const DEFAULTS = {
   balanceUrl: '',
   // Text shown before the balance amount, e.g. "额外 $43.13".
   balancePrefix: '额外 ',
+  // Some providers only expose a cumulative-spend endpoint (OpenAI dashboard
+  // style: `total_usage` in cents). That renders standalone, e.g. "已用 $5.39".
+  usedPrefix: '已用 ',
 };
 
 function loadConfig() {
@@ -134,8 +139,11 @@ function maybeWriteError(cfg, message) {
   }
 }
 
-// Read the CURRENT claude provider's usage_script (url + Cookie) from the
-// cc-switch SQLite DB, so the displayed balance always tracks the active account.
+// Read the CURRENT claude provider's usage_script auth (url + Cookie, or url +
+// Authorization for key-authenticated endpoints) from the cc-switch SQLite DB,
+// so the displayed balance always tracks the active account. cc-switch template
+// placeholders ({{baseUrl}}/{{apiKey}}) are resolved from the provider's env,
+// mirroring what cc-switch itself substitutes before running the script.
 // Returns null if anything is missing/unavailable (caller falls back to static).
 async function resolveFromCcSwitch(cfg) {
   try {
@@ -146,7 +154,7 @@ async function resolveFromCcSwitch(cfg) {
     let row;
     try {
       row = db
-        .prepare(`SELECT name, meta FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1`)
+        .prepare(`SELECT name, meta, settings_config FROM providers WHERE app_type='claude' AND is_current=1 LIMIT 1`)
         .get();
     } finally {
       db.close();
@@ -154,10 +162,28 @@ async function resolveFromCcSwitch(cfg) {
     if (!row) return null;
     const meta = JSON.parse(row.meta);
     const code = meta?.usage_script?.code || '';
-    const url = (code.match(/url:\s*"([^"]+)"/) || [])[1];
+    let env = {};
+    try {
+      env = JSON.parse(row.settings_config)?.env || {};
+    } catch {
+      /* provider env is optional; placeholders just stay unresolved */
+    }
+    const subst = (s) => s
+      .replace(/\{\{baseUrl\}\}/g, env.ANTHROPIC_BASE_URL || '{{baseUrl}}')
+      .replace(/\{\{apiKey\}\}/g, env.ANTHROPIC_AUTH_TOKEN || '{{apiKey}}');
+    const rawUrl = (code.match(/url:\s*"([^"]+)"/) || [])[1];
+    const url = rawUrl ? subst(rawUrl) : rawUrl;
+    if (!url || url.includes('{{')) return null;
     const cookie = (code.match(/"Cookie"\s*:\s*"([^"]*)"/) || [])[1];
-    if (!url || !cookie || !cookie.includes('bm_session=')) return null;
-    return { url, cookie, provider: row.name };
+    if (cookie && cookie.includes('bm_session=')) {
+      return { url, cookie, provider: row.name };
+    }
+    const rawAuth = (code.match(/"Authorization"\s*:\s*"([^"]+)"/) || [])[1];
+    const authorization = rawAuth ? subst(rawAuth) : rawAuth;
+    if (authorization && !authorization.includes('{{')) {
+      return { url, authorization, provider: row.name };
+    }
+    return null;
   } catch (e) {
     log(`cc-switch resolve failed: ${e?.message || e}`);
     return null;
@@ -185,26 +211,24 @@ async function resolveSource(cfg) {
 // timer handle that can trip a libuv assertion (UV_HANDLE_CLOSING) when the
 // process exits via process.exit() on Windows; an explicit controller +
 // clearTimeout in finally removes the lingering handle so exit is clean.
-async function fetchWithTimeout(url, cookie, cfg) {
+async function fetchWithTimeout(url, src, cfg) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
   try {
-    return await fetch(url, {
-      method: 'GET',
-      headers: {
-        Cookie: cookie,
-        'User-Agent': cfg.userAgent,
-        Accept: 'application/json',
-      },
-      signal: ctrl.signal,
-    });
+    const headers = {
+      'User-Agent': cfg.userAgent,
+      Accept: 'application/json',
+    };
+    if (src.cookie) headers.Cookie = src.cookie;
+    if (src.authorization) headers.Authorization = src.authorization;
+    return await fetch(url, { method: 'GET', headers, signal: ctrl.signal });
   } finally {
     clearTimeout(timer);
   }
 }
 
 // Best-effort: fetch the account's extra prepaid balance (creditCents) from the
-// provider's /api/billing endpoint, reusing the same cookie as the usage query.
+// provider's /api/billing endpoint, reusing the same auth as the usage query.
 // Returns a short label like "余额 $43.13", or null if disabled/unavailable so
 // the usage windows still render on their own. Never throws into poll().
 async function fetchBalanceLabel(cfg, src) {
@@ -212,7 +236,7 @@ async function fetchBalanceLabel(cfg, src) {
   const url = cfg.balanceUrl || src.url.replace(/usage(\?.*)?$/, 'billing$1');
   if (!url || url === src.url) return null; // couldn't derive a distinct endpoint
   try {
-    const res = await fetchWithTimeout(url, src.cookie, cfg);
+    const res = await fetchWithTimeout(url, src, cfg);
     if (!res.ok) {
       log(`billing: HTTP ${res.status}`);
       return null;
@@ -239,7 +263,7 @@ async function poll() {
 
   let data;
   try {
-    const res = await fetchWithTimeout(src.url, src.cookie, cfg);
+    const res = await fetchWithTimeout(src.url, src, cfg);
     if (!res.ok) {
       log(`poll: HTTP ${res.status}`);
       maybeWriteError(cfg, `额度查询失败 HTTP ${res.status}`);
@@ -250,6 +274,22 @@ async function poll() {
     log(`poll: fetch error ${e?.message || e}`);
     maybeWriteError(cfg, '额度查询失败:网络错误');
     return 1;
+  }
+
+  // OpenAI-dashboard-style billing endpoint (`…/dashboard/billing/usage`): only
+  // a cumulative spend in cents (`total_usage`) — no windows, no separate
+  // balance endpoint. Write it as a standalone balance_label, which the Usage
+  // line renders on its own when both windows are null.
+  if (data && !data.window5h && data.total_usage !== undefined && data.total_usage !== null) {
+    const snapshot = {
+      updated_at: new Date().toISOString(),
+      five_hour: { used_percentage: null, resets_at: null, detail: null },
+      seven_day: { used_percentage: null, resets_at: null, detail: null },
+      balance_label: `${cfg.usedPrefix}${fmtDollars(data.total_usage)}`,
+    };
+    atomicWriteJson(SNAPSHOT_PATH, snapshot);
+    log(`poll: ok [${src.provider}] ${snapshot.balance_label} (total_usage)`);
+    return 0;
   }
 
   if (!data || !data.window5h) {
@@ -340,7 +380,15 @@ if (process.argv[2] === '--poll') {
       log(`poll fatal: ${e?.message || e}`);
       process.exitCode = 1;
     })
-    .finally(() => {
+    .finally(async () => {
+      // Proactively close undici's global agent so keep-alive sockets are torn
+      // down now: some servers hold them long enough to reach the watchdog's
+      // process.exit(), which is exactly the UV_HANDLE_CLOSING race.
+      try {
+        await globalThis[Symbol.for('undici.globalDispatcher.1')]?.close?.();
+      } catch {
+        /* best-effort */
+      }
       setTimeout(() => process.exit(process.exitCode ?? 0), 8000).unref();
     });
 } else {
